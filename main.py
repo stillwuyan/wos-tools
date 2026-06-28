@@ -4,13 +4,11 @@ from __future__ import annotations
 import argparse
 import socket
 import subprocess
-import sys
 import threading
 import time
 import os
 from pathlib import Path
 from typing import Optional
-import re
 import cv2
 import av
 import numpy as np
@@ -161,18 +159,6 @@ class ScrcpyVideoUI:
         )
         self._server_proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    def _resolve_display_size(self):
-        proc = self._run_adb("shell", "wm", "size")
-        matches = re.findall(r"(Override|Physical) size:\s*(\d+)x(\d+)", proc.stdout)
-        if not matches:
-            raise RuntimeError(f"Failed to parse display size: {proc.stdout.strip()}")
-
-        for label, width, height in matches:
-            if label == "Override":
-                return (int(width), int(height))
-        _, width, height = matches[0]
-        return (int(width), int(height))
-
     def start(self):
         self._open_listener()
         reverse_target = f"localabstract:{self.socket_name}"
@@ -218,8 +204,7 @@ class ScrcpyVideoUI:
                 self._server_proc.kill()
         except Exception:
             pass
-        if self._task_cancel_event:
-            self._task_cancel_event.set()
+        self._task_cancel_event.set()
         self._conn = None
         self._control_conn = None
         self._listener = None
@@ -233,7 +218,7 @@ class ScrcpyVideoUI:
                 try:
                     hdr = self._read_exact(sock, 12)
                 except Exception as exc:
-                    logger.debug('decode_loop: read_exact failed: %s', exc)
+                    logger.warning('decode_loop: read_exact failed: %s', exc)
                     break
                 if not hdr:
                     break
@@ -299,68 +284,71 @@ class ScrcpyVideoUI:
         return dx, dy
 
     def _setup_window(self, win_name: str, display_size):
+        self._win_name = win_name
+        self._win_display_size = display_size
         cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
         if display_size is not None:
             cv2.resizeWindow(win_name, display_size[0], display_size[1])
 
         if self.selection_enabled:
-            def mouse_callback(event, x, y, flags, param):
-                self.current_x, self.current_y = x, y
-                win_size = self._get_window_size(win_name)
-                win_w, win_h = win_size if win_size else (display_size if display_size else (1, 1))
+            cv2.setMouseCallback(win_name, self._on_mouse_event)
 
-                frame_coord = self._map_window_to_frame(x, y, win_w, win_h)
-                if frame_coord:
-                    self.current_frame_x, self.current_frame_y = frame_coord
-                else:
-                    self.current_frame_x = self.current_frame_y = -1
+    def _on_mouse_event(self, event, x, y, flags, param):
+        self.current_x, self.current_y = x, y
+        win_size = self._get_window_size(self._win_name)
+        ds = self._win_display_size
+        win_w, win_h = win_size if win_size else (ds if ds else (1, 1))
 
-                dev_coord = self._map_window_to_device(x, y, win_w, win_h)
-                if dev_coord:
-                    self.current_dev_x, self.current_dev_y = dev_coord
-                else:
-                    self.current_dev_x = self.current_dev_y = -1
+        frame_coord = self._map_window_to_frame(x, y, win_w, win_h)
+        if frame_coord:
+            self.current_frame_x, self.current_frame_y = frame_coord
+        else:
+            self.current_frame_x = self.current_frame_y = -1
 
-                if event == cv2.EVENT_LBUTTONDOWN:
-                    self.drawing = True
-                    self.ix, self.iy = x, y
-                elif event == cv2.EVENT_LBUTTONUP:
-                    self.drawing = False
-                    x1, y1 = min(self.ix, x), min(self.iy, y)
-                    x2, y2 = max(self.ix, x), max(self.iy, y)
-                    if x2 > x1 and y2 > y1:
-                        f1 = self._map_window_to_frame(x1, y1, win_w, win_h)
-                        f2 = self._map_window_to_frame(x2, y2, win_w, win_h)
-                        with self._latest_lock:
-                            if self._latest is not None and f1 and f2:
-                                fx1, fy1 = f1
-                                fx2, fy2 = f2
-                                fw, fh = self._latest_size
-                                fx1 = max(0, min(fw - 1, fx1))
-                                fx2 = max(0, min(fw, fx2))
-                                fy1 = max(0, min(fh - 1, fy1))
-                                fy2 = max(0, min(fh, fy2))
-                                self.roi_image = self._latest[fy1:fy2, fx1:fx2].copy() if fx2 > fx1 and fy2 > fy1 else None
-                            else:
-                                self.roi_image = None
+        dev_coord = self._map_window_to_device(x, y, win_w, win_h)
+        if dev_coord:
+            self.current_dev_x, self.current_dev_y = dev_coord
+        else:
+            self.current_dev_x = self.current_dev_y = -1
 
-                        d1 = self._map_window_to_device(x1, y1, win_w, win_h)
-                        d2 = self._map_window_to_device(x2, y2, win_w, win_h)
-                        if d1 and d2 and f1 and f2:
-                            logger.info("Selected ROI: window=(%d,%d)->(%d,%d), frame=(%d,%d)->(%d,%d), device=(%d,%d)->(%d,%d)",
-                                x1, y1, x2, y2, f1[0], f1[1], f2[0], f2[1], d1[0], d1[1], d2[0], d2[1])
-                        elif f1 and f2:
-                            logger.info("Selected ROI: window=(%d,%d)->(%d,%d), frame=(%d,%d)->(%d,%d)",
-                                x1, y1, x2, y2, f1[0], f1[1], f2[0], f2[1])
+        if event == cv2.EVENT_LBUTTONDOWN:
+            self.drawing = True
+            self.ix, self.iy = x, y
+        elif event == cv2.EVENT_LBUTTONUP:
+            self.drawing = False
+            x1, y1 = min(self.ix, x), min(self.iy, y)
+            x2, y2 = max(self.ix, x), max(self.iy, y)
+            if x2 > x1 and y2 > y1:
+                f1 = self._map_window_to_frame(x1, y1, win_w, win_h)
+                f2 = self._map_window_to_frame(x2, y2, win_w, win_h)
+                with self._latest_lock:
+                    if self._latest is not None and f1 and f2:
+                        fx1, fy1 = f1
+                        fx2, fy2 = f2
+                        fw, fh = self._latest_size
+                        fx1 = max(0, min(fw - 1, fx1))
+                        fx2 = max(0, min(fw, fx2))
+                        fy1 = max(0, min(fh - 1, fy1))
+                        fy2 = max(0, min(fh, fy2))
+                        self.roi_image = self._latest[fy1:fy2, fx1:fx2].copy() if fx2 > fx1 and fy2 > fy1 else None
                     else:
-                        tol = 4
-                        if abs(x - self.ix) <= tol and abs(y - self.iy) <= tol:
-                            if self.current_dev_x != -1 and self.current_dev_y != -1:
-                                logger.info("Mouse click at device=(%d, %d)", self.current_dev_x, self.current_dev_y)
-                            else:
-                                logger.info("Mouse click at window=(%d, %d)", x, y)
+                        self.roi_image = None
 
-            cv2.setMouseCallback(win_name, mouse_callback, self)
+                d1 = self._map_window_to_device(x1, y1, win_w, win_h)
+                d2 = self._map_window_to_device(x2, y2, win_w, win_h)
+                if d1 and d2 and f1 and f2:
+                    logger.info("Selected ROI: window=(%d,%d)->(%d,%d), frame=(%d,%d)->(%d,%d), device=(%d,%d)->(%d,%d)",
+                        x1, y1, x2, y2, f1[0], f1[1], f2[0], f2[1], d1[0], d1[1], d2[0], d2[1])
+                elif f1 and f2:
+                    logger.info("Selected ROI: window=(%d,%d)->(%d,%d), frame=(%d,%d)->(%d,%d)",
+                        x1, y1, x2, y2, f1[0], f1[1], f2[0], f2[1])
+            else:
+                tol = 4
+                if abs(x - self.ix) <= tol and abs(y - self.iy) <= tol:
+                    if self.current_dev_x != -1 and self.current_dev_y != -1:
+                        logger.info("Mouse click at device=(%d, %d)", self.current_dev_x, self.current_dev_y)
+                    else:
+                        logger.info("Mouse click at window=(%d, %d)", x, y)
 
     def _compute_display_size(self, width: Optional[int] = None, height: Optional[int] = None):
         """Return a (w,h) tuple scaled to one-third of provided or known display size, or None."""
@@ -402,7 +390,6 @@ class ScrcpyVideoUI:
         _, max_val, _, max_loc = cv2.minMaxLoc(res)
 
         elapsed = time.perf_counter() - start
-        logger.debug("Template match: score=%.4f, elapsed=%.6fs", max_val, elapsed)
 
         if max_val >= float(threshold):
             top_left = max_loc
@@ -413,8 +400,8 @@ class ScrcpyVideoUI:
                 mapped = self.map_frame_to_device(cx, cy, frame=frame)
                 if mapped is not None:
                     dev_x, dev_y = mapped
-                    return (dev_x, dev_y, elapsed)
-            return (cx, cy, elapsed)
+                    return (dev_x, dev_y, elapsed, max_val)
+            return (cx, cy, elapsed, max_val)
 
         # On mismatch, save template + frame and a small info file for debugging.
         if debug:
@@ -522,63 +509,67 @@ class ScrcpyVideoUI:
                     else:
                         logger.error("Failed to save ROI to %s", fname)
             elif key == ord('t'):
-                cfg = importlib.import_module('config')
+                self._run_task_dialog()
 
-                task_keys = []
-                task_keys = list(cfg.task_list.keys())
-                action_list = cfg.action_list
+    def _run_task_dialog(self):
+        """Show task selection dialog and start the chosen task in a background thread."""
+        cfg = importlib.import_module('config')
+        task_keys = list(cfg.task_list.keys())
+        action_list = cfg.action_list
 
-                if not task_keys:
-                    messagebox.showinfo('Tasks', 'No tasks available in config.task_list')
-                else:
-                    def choose_task_dialog(options):
-                        root = tk.Tk()
-                        root.title('Choose task')
-                        root.geometry('300x200')
-                        root.attributes('-topmost', True)
+        if not task_keys:
+            messagebox.showinfo('Tasks', 'No tasks available in config.task_list')
+            return
 
-                        sel = {'choice': None}
+        choice = self._choose_task_dialog(task_keys)
+        if not choice:
+            logger.info('Task selection cancelled')
+        elif choice not in task_keys:
+            logger.error('Invalid task selected: %s', choice)
+        else:
+            task = cfg.task_list.get(choice)
+            logger.info('Selected task %s: %s', choice, task)
+            self._task_cancel_event.clear()
+            t = threading.Thread(target=handle_task, args=(self, choice, task, action_list), daemon=True)
+            t.start()
+            self._task_thread = t
 
-                        lb = tk.Listbox(root)
-                        for it in options:
-                            lb.insert(tk.END, it)
-                        lb.pack(fill=tk.BOTH, expand=True)
+    def _choose_task_dialog(self, options):
+        """Display a tkinter dialog to choose a task. Returns the selected key or None."""
+        root = tk.Tk()
+        root.title('Choose task')
+        root.geometry('300x200')
+        root.attributes('-topmost', True)
 
-                        def on_ok():
-                            sel_idx = lb.curselection()
-                            if sel_idx:
-                                sel['choice'] = lb.get(sel_idx[0])
-                            root.quit()
+        sel = {'choice': None}
 
-                        def on_cancel():
-                            sel['choice'] = None
-                            root.quit()
+        lb = tk.Listbox(root)
+        for it in options:
+            lb.insert(tk.END, it)
+        lb.pack(fill=tk.BOTH, expand=True)
 
-                        btn_frame = tk.Frame(root)
-                        btn_frame.pack(fill=tk.X)
-                        ok_btn = tk.Button(btn_frame, text='OK', command=on_ok)
-                        ok_btn.pack(side=tk.LEFT, expand=True, fill=tk.X)
-                        cancel_btn = tk.Button(btn_frame, text='Cancel', command=on_cancel)
-                        cancel_btn.pack(side=tk.LEFT, expand=True, fill=tk.X)
+        def on_ok():
+            sel_idx = lb.curselection()
+            if sel_idx:
+                sel['choice'] = lb.get(sel_idx[0])
+            root.quit()
 
-                        root.protocol('WM_DELETE_WINDOW', on_cancel)
-                        root.focus_force()
-                        root.mainloop()
-                        root.destroy()
-                        return sel['choice']
+        def on_cancel():
+            sel['choice'] = None
+            root.quit()
 
-                    choice = choose_task_dialog(task_keys)
-                    if not choice:
-                        logger.info('Task selection cancelled')
-                    elif choice not in task_keys:
-                        logger.error('Invalid task selected: %s', choice)
-                    else:
-                        task = cfg.task_list.get(choice)
-                        logger.info('Selected task %s: %s', choice, task)
-                        self._task_cancel_event.clear()
-                        t = threading.Thread(target=handle_task, args=(self, choice, task, action_list), daemon=True)
-                        t.start()
-                        self._task_thread = t
+        btn_frame = tk.Frame(root)
+        btn_frame.pack(fill=tk.X)
+        ok_btn = tk.Button(btn_frame, text='OK', command=on_ok)
+        ok_btn.pack(side=tk.LEFT, expand=True, fill=tk.X)
+        cancel_btn = tk.Button(btn_frame, text='Cancel', command=on_cancel)
+        cancel_btn.pack(side=tk.LEFT, expand=True, fill=tk.X)
+
+        root.protocol('WM_DELETE_WINDOW', on_cancel)
+        root.focus_force()
+        root.mainloop()
+        root.destroy()
+        return sel['choice']
 
 
 def parse_args():
