@@ -1,0 +1,61 @@
+# 野兽任务：野外 → 搜索面板选野兽并搜索 → 点击攻击 → 出征场景选预设队伍并出征 → 确认回野外。
+# 出征场景与巨兽任务共用；无可用行军队列时本轮挂起，由上层决定重试。
+task: beast
+start: wild
+result: verified
+steps:
+  # 1) 野外主场景点搜索按钮，弹出搜索面板
+  - click: [69, 1793]
+    require_scene: wild
+    expect: {scene: search_panel}
+    timeout: 10
+    retry: {count: 2, interval: 3}
+  # 2) 匹配野兽模板并点击其中心，选中野兽类型
+  - click_image:
+      image: tasks/templates/search/beast_template.png
+      region: [0, 1687, 1073, 303]
+    require_scene: search_panel
+  # 选择野兽后留出界面响应时间；视频解码在线程中继续进行。
+  - wait: 0.5
+  # 3) 搜索野兽，等待出现攻击按钮
+  - click: [536, 2303]
+    require_scene: search_panel
+    expect:
+      image: tasks/templates/search/attack_button.png
+      region: [230, 1054, 628, 242]
+    timeout: 20
+    on_timeout: failed
+  # 4) 点击攻击按钮，观察进入出征场景或出现无可用行军队列提示
+  - click_image:
+      image: tasks/templates/search/attack_button.png
+      region: [230, 1054, 628, 242]
+    require_scene: search_panel
+  - detect:
+      timeout: 10
+      on_timeout: uncertain
+      branches:
+        - when: {scene: expedition}
+          steps:
+            # 5) 进入出征场景后选择预设队伍
+            - click: [761, 257]
+              require_scene: expedition
+        - when: {scene: noqueue}
+          result: suspended
+          reason: "no available army queue"
+  # 预设队伍点击后留出界面响应时间，再点击出征。
+  - wait: 0.5
+  # 6) 点击出征；可能因体力不足弹出对话框，或成功后切回野外。
+  - click: [803, 2306]
+    require_scene: expedition
+  - detect:
+      timeout: 10
+      on_timeout: uncertain
+      branches:
+        - when: {scene: wild}
+          steps:
+            - wait: 0.1
+        - when: {scene: stamina_dialog}
+          result: suspended
+          reason: "insufficient leader stamina"
+  # 7) 确认已回到野外主场景
+  - wait_scene: {scenes: [wild], timeout: 10}

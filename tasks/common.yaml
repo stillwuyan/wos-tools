@@ -1,0 +1,135 @@
+# device 尺寸来自 mark 会话 meta（captures 为一次性采集产物，本文件不引用其下任何文件）。
+# 主场景切换按钮点 = 当前场景模板的匹配中心（click_image 动态定位）。
+# 注：rally_popup 的场景判断图与"发起集结按钮"是同一张图（发起集结按钮可见 = 处于集结弹窗），
+# 巨兽与野兽共用搜索模板；相关模板集中放在 tasks/templates/search/。
+device:
+  frame_size: [1080, 2400]
+  device_size: [1080, 2400]
+
+scenes:
+  # 匹配到即说明当前处于该主场景（右下角角标）。
+  town:
+    type: main
+    image: tasks/templates/town.png
+    region: [852, 2163, 215, 237]
+  wild:
+    type: main
+    image: tasks/templates/wild.png
+    region: [852, 2163, 215, 237]
+
+  # 通用搜索子场景：点搜索按钮后、到集结或攻击按钮出现为止全程停留此场景。
+  # 点搜索/集结/攻击等按钮不离开此场景。
+  # 点搜索后的加载阶段画面顶部同时显示子任务 banner（sub_task），两模板同中，
+  # 故 covers 声明 sub_task：以本场景为准（2026-11-03 实机 SceneConflict 后补）。
+  search_panel:
+    type: sub
+    image: tasks/templates/search/search_panel.png
+    region: [224, 2166, 604, 221]
+    covers: [wild, sub_task]
+    exit:
+      - back: true
+      - wait: 0.5
+      - wait_scene: {scenes: [wild], timeout: 10}
+  # 集结弹窗：与出征场景(expedition)是两个不同子场景。
+  # 判断图即"发起集结按钮"，按钮可见即弹窗已出现。
+  # 弹窗画面同时显示子任务 banner（sub_task），covers 声明该关系：两模板同中时以本场景为准。
+  # 退出（仅 prepare/finish 兜底用，正常任务流不走）：back 回搜索子场景，再 back 回野外。
+  # 框架要求 exit 末尾的 wait_scene 只能等主场景，故分两段。
+  rally_popup:
+    type: sub
+    image: tasks/templates/search/rally_popup.png
+    region: [24, 821, 1040, 800]
+    covers: [search_panel, sub_task, wild]
+    exit:
+      - back: true
+      - wait: 0.5
+      - wait_scene: {scenes: [search_panel], timeout: 10}
+      - back: true
+      - wait: 0.5
+      - wait_scene: {scenes: [wild], timeout: 10}
+  # 出征场景（巨兽集结与野兽攻击共用的选队伍/出征画面）。
+  # covers sub_task 是防御性声明：若该画面也显示子任务 banner，两模板同中时以本场景为准
+  # （任务执行中本画面会被识别多次，不声明则与集结弹窗同样的冲突会在此爆发）；
+  # 若实际不显示 banner，此声明永不生效，无副作用。
+  expedition:
+    type: sub
+    image: tasks/templates/search/expedition.png
+    region: [582, 2154, 494, 242]
+    covers: [rally_popup, sub_task, wild]
+    exit:
+      - back: true
+      - wait: 0.5
+      - wait_scene: {scenes: [rally_popup], timeout: 10}
+      - back: true
+      - wait: 0.5
+      - wait_scene: {scenes: [wild], timeout: 10}
+  # 体力不足时，点击出征可能弹出“获取更多”体力窗口，出征不会发生。
+  # 最多返回弹窗及其下方的集结/搜索界面；每次返回后重新识别，回到主场景即停止。
+  stamina_dialog:
+    type: sub
+    image: tasks/templates/search/stamina_dialog.png
+    region: [9, 387, 1055, 361]
+    covers: [expedition, rally_popup, search_panel, sub_task, wild]
+    exit:
+      - back: true
+      - wait: 0.5
+      - wait_scene: {scenes: [expedition, rally_popup, search_panel, wild], timeout: 10}
+      - back: true
+      - wait: 0.5
+      - wait_scene: {scenes: [expedition, rally_popup, search_panel, wild], timeout: 10}
+      - back: true
+      - wait: 0.5
+      - wait_scene: {scenes: [expedition, rally_popup, search_panel, wild], timeout: 10}
+      - back: true
+      - wait: 0.5
+      - wait_scene: {scenes: [wild], timeout: 10}
+  # 无可用行军队列提示框：点集结/攻击按钮后无可征队伍时弹出（屏幕中上部宽框）。
+  # 出现即本轮无队列可做，任务的 detect 判 suspended 结束本轮；back 可关闭并回搜索子场景（2026-11-03 实机确认）。
+  # 无队列提示出现时画面顶部通常仍显示子任务 banner（sub_task），covers 声明以防同帧冲突。
+  noqueue:
+    type: sub
+    image: tasks/templates/search/noqueue_banner.png
+    region: [48, 615, 992, 833]
+    covers: [search_panel, sub_task, wild]
+    # 框架要求 exit 末尾 wait_scene 只能等主场景，故分两段：back 关弹窗回搜索子场景，再 back 回野外。
+    exit:
+      - back: true
+      - wait: 0.5
+      - wait_scene: {scenes: [search_panel], timeout: 10}
+      - back: true
+      - wait: 0.5
+      - wait_scene: {scenes: [wild], timeout: 10}
+  # 通用子任务场景：使用返回箭头标识；子界面可能嵌套，需逐层返回并在每层后重新识别。
+  # 最多返回 2 层；每一步允许仍在 sub_task 或已回到主场景。prepare/finish 一旦识别到
+  # 主场景会立即终止剩余出口动作，避免多退一层；超过上限则停止等待，不盲目继续返回。
+  # 每次返回后先等 0.5 秒再识别，避免界面转场期间把旧 sub_task 画面当成下一层仍未退出。
+  sub_task:
+    type: sub
+    image: tasks/templates/sub_task_banner.png
+    region: [6, 9, 142, 184]
+    covers: [town, wild]
+    exit:
+      - back: true
+      - wait: 0.5
+      - wait_scene: {scenes: [sub_task, town, wild], timeout: 10}
+      - back: true
+      - wait: 0.5
+      - wait_scene: {scenes: [town, wild], timeout: 10}
+
+# 主场景切换：当前主场景的角标模板匹配中心即切换按钮点，故用 click_image
+# 点击"当前场景"模板的匹配中心（动态定位，比固定坐标更稳）。
+switches:
+  - from: town
+    to: wild
+    steps:
+      - click_image:
+          image: tasks/templates/town.png
+          region: [852, 2163, 215, 237]
+      - wait_scene: {scenes: [wild], timeout: 10}
+  - from: wild
+    to: town
+    steps:
+      - click_image:
+          image: tasks/templates/wild.png
+          region: [852, 2163, 215, 237]
+      - wait_scene: {scenes: [town], timeout: 10}
