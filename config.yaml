@@ -1,0 +1,11 @@
+scrcpy:
+  server_jar: 'C:\xspace\software\scrcpy-win64-v3.3.4\scrcpy-server'
+  # 点击随机偏移半径（设备像素）。每次 tap 在 ±该值 内随机取点，已做屏幕边界钳制。
+  # 0（或省略）= 精确坐标。run 与 cmd 的点击/模板点击均生效；swipe/back 不受影响。
+  tap_jitter_pixels: 8
+  # false 时请求关闭物理屏幕，退出时尽力恢复；设备是否执行取决于系统支持。
+  # 默认为 true；任务列表设置和命令行 --screen-off 优先级更高。
+  #screen_on: true
+  # cleanup=false 时 scrcpy 3.3.4 不会执行此设置；设备仍可能休眠。
+  # 默认为 false；任务列表设置和命令行 --stay-awake 优先级更高。
+  #stay_awake: false

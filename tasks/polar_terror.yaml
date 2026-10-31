@@ -1,0 +1,56 @@
+# 自动打巨兽任务（2026-11-01 实机 mark 记录流程为准）：
+# 野外 → 点搜索按钮 → 搜索子场景：选巨兽、搜索、点集结按钮 → 集结弹窗：点发起集结
+# → 集结子场景：选队伍(预设)、出征 → 确认回野外。
+# start: wild 由 prepare 处理主场景切换（城镇自动切到野外）。
+# 点搜索按钮后、到集结按钮出现为止，一直停留在搜索子场景（titan_search_panel），不返回野外。
+# 任务结果：verified = 集结命令已发出（出征后确认回野外）；suspended = 无可用行军队列，
+# 本轮挂起（reason 见 detect 分支），由上层（loop retry / 下一轮）再试。
+task: polar_terror
+start: wild
+result: verified
+steps:
+  # 1) 野外主场景点搜索按钮，弹出搜索面板
+  - click: [69, 1793]
+    require_scene: wild
+    expect: {scene: titan_search_panel}
+    timeout: 10
+    retry: {count: 2, interval: 3}
+  # 2) 匹配巨兽模板并点击其中心，选中巨兽类型（选中只改面板内状态，不加 expect）
+  - click_image: tasks/templates/polar_terror/titan_template.png
+    require_scene: titan_search_panel
+  # 3) 点搜索按钮，仍在搜索子场景内，搜索完成后画面出现集结按钮
+  - click: [536, 2303]
+    require_scene: titan_search_panel
+    expect: {image: tasks/templates/polar_terror/rally_button.png}
+    timeout: 10
+    on_timeout: failed
+    retry: {count: 2, interval: 3}
+  # 4) 点击集结按钮（仍在搜索子场景内）
+  - click_image: tasks/templates/polar_terror/rally_button.png
+    require_scene: titan_search_panel
+  # 4b) 观察结果：集结弹窗出现 → 点发起集结，继续出征流程；
+  #     "无可用行军队列"提示出现 → 本轮挂起（suspended，下一轮再试）。
+  - detect:
+      timeout: 10
+      on_timeout: uncertain
+      branches:
+        - when: {scene: rally_popup}
+          steps:
+            # 5) 点击发起集结按钮（即集结弹窗场景判断图），进入集结子场景
+            - click_image: tasks/templates/polar_terror/rally_popup.png
+              require_scene: rally_popup
+              expect: {scene: rally_mission}
+              timeout: 10
+              retry: {count: 2, interval: 3}
+        - when: {scene: noqueue}
+          result: suspended
+          reason: "no available army queue"
+  # 6) 点选队伍按钮，使用预设队伍（不弹新面板，直接进下一步）
+  - click: [761, 257]
+    require_scene: rally_mission
+  # 7) 点击出征按钮，游戏开始执行集结巨兽任务，画面随后切回野外主场景
+  - click: [803, 2306]
+    require_scene: rally_mission
+  # 8) 确认已回到野外主场景（出征唯一的画面确认，也是 verified 末尾证据；
+  #     出征后画面切换有延迟，超时则 uncertain 停列待人工；轮间等待由 loop.wait 承担）
+  - wait_scene: {scenes: [wild], timeout: 10}

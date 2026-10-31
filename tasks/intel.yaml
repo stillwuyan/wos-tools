@@ -1,0 +1,32 @@
+# Illustrative flow only. No images or actions have been verified on a device.
+task: intel
+start: wild
+steps:
+  - click_image: tasks/templates/intel/open.png
+    require_scene: wild
+    expect: {scene: intel}
+    timeout: 10
+    on_timeout: uncertain
+  - wait: 1
+  - detect:
+      timeout: 10
+      on_timeout: uncertain
+      branches:
+        - when: {image: tasks/templates/intel/empty.png}
+          result: unverified
+          reason: No independent evidence that rewards were claimed.
+        - when: {image: tasks/templates/intel/claim_button.png}
+          steps:
+            - click_image: tasks/templates/intel/claim_button.png
+              require_scene: intel
+              expect: {scene: claim_popup}
+              timeout: 10
+              on_timeout: uncertain
+            # Placeholder device coordinate; verify the safe close point first.
+            - click: [540, 1600]
+              require_scene: claim_popup
+              expect: {scene: intel}
+              timeout: 10
+              on_timeout: uncertain
+  # Branch steps continue here; this wait is not proof of a successful claim.
+  - wait: 1

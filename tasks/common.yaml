@@ -1,0 +1,92 @@
+# device 尺寸来自 mark 会话 meta（captures 为一次性采集产物，本文件不引用其下任何文件）。
+# 主场景切换按钮点 = 当前场景模板的匹配中心（click_image 动态定位）。
+# 注：rally_popup 的场景判断图与"发起集结按钮"是同一张图（发起集结按钮可见 = 处于集结弹窗），
+# 故 tasks/polar_terror.yaml 第 5 步 click_image 也引用 rally_popup.png，全库只保留一份。
+device:
+  frame_size: [1080, 2400]
+  device_size: [1080, 2400]
+
+scenes:
+  # 已采集：匹配到即说明当前处于该主场景（右下角角标）。
+  town:
+    type: main
+    image: tasks/templates/town.png
+  wild:
+    type: main
+    image: tasks/templates/wild.png
+
+  # 巨兽搜索子场景：点搜索按钮后、到集结按钮出现为止全程停留此场景。
+  # 点搜索/集结等按钮不离开此场景。
+  # 点搜索后的加载阶段画面顶部同时显示子任务 banner（sub_task），两模板同中，
+  # 故 covers 声明 sub_task：以本场景为准（2026-11-03 实机 SceneConflict 后补）。
+  titan_search_panel:
+    type: sub
+    image: tasks/templates/polar_terror/titan_search_panel.png
+    covers: [wild, sub_task]
+    exit:
+      - back: true
+      - wait_scene: {scenes: [wild], timeout: 10}
+  # 集结弹窗：与集结子场景(rally_mission)是两个不同子场景。
+  # 判断图即"发起集结按钮"，按钮可见即弹窗已出现。
+  # 弹窗画面同时显示子任务 banner（sub_task），covers 声明该关系：两模板同中时以本场景为准。
+  # 退出（仅 prepare/finish 兜底用，正常任务流不走）：back 回搜索子场景，再 back 回野外。
+  # 框架要求 exit 末尾的 wait_scene 只能等主场景，故分两段。
+  rally_popup:
+    type: sub
+    image: tasks/templates/polar_terror/rally_popup.png
+    covers: [titan_search_panel, sub_task, wild]
+    exit:
+      - back: true
+      - wait_scene: {scenes: [titan_search_panel], timeout: 10}
+      - back: true
+      - wait_scene: {scenes: [wild], timeout: 10}
+  # 集结子场景（选队伍/出征画面）。
+  # covers sub_task 是防御性声明：若该画面也显示子任务 banner，两模板同中时以本场景为准
+  # （任务执行中本画面会被识别多次，不声明则与集结弹窗同样的冲突会在此爆发）；
+  # 若实际不显示 banner，此声明永不生效，无副作用。
+  rally_mission:
+    type: sub
+    image: tasks/templates/polar_terror/rally_mission.png
+    covers: [rally_popup, sub_task, wild]
+    exit:
+      - back: true
+      - wait_scene: {scenes: [rally_popup], timeout: 10}
+      - back: true
+      - wait_scene: {scenes: [wild], timeout: 10}
+  # 无可用行军队列提示框：点集结按钮后无可征队伍时弹出（屏幕中上部宽框）。
+  # 出现即本轮无队列可做，巨兽任务的 detect 判 unverified 结束本轮；back 可关闭并回搜索子场景（2026-11-03 实机确认）。
+  # 无队列提示出现时画面顶部通常仍显示子任务 banner（sub_task），covers 声明以防同帧冲突。
+  noqueue:
+    type: sub
+    image: tasks/templates/polar_terror/noqueue_banner.png
+    covers: [titan_search_panel, sub_task, wild]
+    # 框架要求 exit 末尾 wait_scene 只能等主场景，故分两段：back 关弹窗回搜索子场景，再 back 回野外。
+    exit:
+      - back: true
+      - wait_scene: {scenes: [titan_search_panel], timeout: 10}
+      - back: true
+      - wait_scene: {scenes: [wild], timeout: 10}
+  # 通用子任务场景：画面顶部的子任务标识（大部分子任务画面共有），主场景画面没有。
+  # 任务开始（prepare）或收尾（finish）时若处于这类画面，先 back 退出到主场景，
+  # 再识别城镇/野外并按任务要求切换。
+  sub_task:
+    type: sub
+    image: tasks/templates/sub_task_banner.png
+    covers: [town, wild]
+    exit:
+      - back: true
+      - wait_scene: {scenes: [town, wild], timeout: 10}
+
+# 主场景切换：当前主场景的角标模板匹配中心即切换按钮点，故用 click_image
+# 点击"当前场景"模板的匹配中心（动态定位，比固定坐标更稳）。
+switches:
+  - from: town
+    to: wild
+    steps:
+      - click_image: tasks/templates/town.png
+      - wait_scene: {scenes: [wild], timeout: 10}
+  - from: wild
+    to: town
+    steps:
+      - click_image: tasks/templates/wild.png
+      - wait_scene: {scenes: [town], timeout: 10}

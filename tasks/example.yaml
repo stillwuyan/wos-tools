@@ -1,0 +1,8 @@
+# 自动打巨兽任务列表：重复引用 polar_terror.yaml 即多轮执行，每轮以回到野外收尾。
+# 首轮验收建议只保留一条且 on_failure: stop，跑通后再扩轮数并改 skip。
+common: tasks/common.yaml
+tasks:
+  - file: tasks/polar_terror.yaml
+    on_failure: stop
+#  - file: tasks/polar_terror.yaml
+#    on_failure: skip

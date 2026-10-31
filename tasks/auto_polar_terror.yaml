@@ -1,0 +1,22 @@
+# 自动巨兽循环任务列表：重复执行 polar_terror.yaml，直到成功次数达到 count。
+# 成功 = 集结命令已发出（result verified：出征后确认回野外）；无队列退出
+#（result suspended）不计入成功次数，等待一段时间后自动重试，连续超过
+# max_retries 次则停止。每成功一次后等待配置时间后再开始下一轮。
+# 说明：可在下方设置是否通过控制通道请求关闭物理屏幕，能否生效取决于设备。
+# 保留设备端 jar 所需的 cleanup=false 会使 stay_awake 失效，设备仍可能休眠、
+# 视频流可能中断；仅当 screen_on 为 false 时显示只读预览窗口。
+common: tasks/common.yaml
+scrcpy:
+  screen_on: true
+  stay_awake: false
+loop:
+  count: 3                      # 需要成功完成的轮数（按需调整）
+  file: tasks/polar_terror.yaml
+  on_failure: stop              # failed/uncertain 结果时停止；skip 表示该轮跳过继续
+  wait: 30                      # 每成功一次后等待秒数（3 分钟）
+  success:
+    result: verified            # 任务末尾 wait_scene 确认回野外 = 集结已发出
+  retry:
+    - result: suspended         # 结果为 suspended（无可用行军队列）时重试
+      wait: 30                  # 挂起后等待秒数（30 秒）
+  max_retries: 10               # 两次成功之间连续重试上限（防队列长期不可用死循环）
